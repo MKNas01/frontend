@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { checkNetwork } from "./useNetworkCheck.js";
 import { signWithFreighter } from "../lib/freighter.js";
+import { newIdempotencyKey } from "../lib/idempotency.js";
 
 type Status = "idle" | "preparing" | "signing" | "submitting" | "confirmed" | "error";
 
@@ -39,10 +40,11 @@ export function useSignedMutation<TParams, TResult>(
     setError(null);
     setNetworkWarning(null);
     setResult(null);
-    // One idempotency key per logical operation, reused across prepare/submit retries
-    const idempotencyKey = crypto.randomUUID();
 
     try {
+      // One idempotency key per logical operation, reused across prepare/submit retries
+      const idempotencyKey = newIdempotencyKey();
+
       // Step 1 — fetch unsigned XDR from the server
       setStatus("preparing");
       const { unsignedXdr, networkPassphrase } = await callbacks.prepare(params, idempotencyKey);
