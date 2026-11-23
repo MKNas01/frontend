@@ -392,5 +392,13 @@
     "copy": "Copiar",
     "copy_access_url": "Copiar URL de acceso",
     "buy": "Comprar {{price}} USDC"
+  },
+  "pwa": {
+    "ready": "Hay una nueva versión disponible.",
+    "applying": "Aplicando actualización cuando la aplicación esté inactiva…",
+    "update_failed": "La actualización falló. Inténtelo de nuevo.",
+    "update": "Actualizar",
+    "updating": "Actualizando…",
+    "retry": "Reintentar"
   }
 }
