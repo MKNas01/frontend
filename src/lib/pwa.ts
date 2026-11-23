@@ -1,6 +1,6 @@
 import { registerSW } from "virtual:pwa-register";
 
-export type ServiceWorkerUpdateHandler = (update: () => void) => void;
+export type ServiceWorkerUpdateHandler = (update: () => Promise<void>) => void;
 
 /**
  * Register the PWA without taking control during the current session.
@@ -11,25 +11,7 @@ export function registerAppServiceWorker(onUpdateAvailable: ServiceWorkerUpdateH
   let idleHandle: number | undefined;
   let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
 
-  const updateSW = registerSW({
-    immediate: false,
-    onNeedRefresh() {
-      onUpdateAvailable(() => {
-        const activate = () => void updateSW(true);
-        if ("requestIdleCallback" in window) {
-          idleHandle = window.requestIdleCallback(activate, { timeout: 30_000 });
-        } else {
-          timeoutHandle = globalThis.setTimeout(activate, 1_000);
-        }
-      });
-    },
-  });
-  // vite-plugin-pwa does not expose an unregister operation from registerSW;
-  // the worker lifecycle is managed by the browser after registration.  The
-  // cleanup below cancels any scheduled activation that the user accepted but
-  // that has not yet fired, so an unmounted component does not trigger an
-  // update.
-  return () => {
+  const cancelScheduledActivation = () => {
     if (idleHandle !== undefined && "cancelIdleCallback" in window) {
       window.cancelIdleCallback(idleHandle);
       idleHandle = undefined;
@@ -39,4 +21,35 @@ export function registerAppServiceWorker(onUpdateAvailable: ServiceWorkerUpdateH
       timeoutHandle = undefined;
     }
   };
+
+  const updateSW = registerSW({
+    immediate: false,
+    onNeedRefresh() {
+      onUpdateAvailable(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            cancelScheduledActivation();
+            const activate = () => {
+              idleHandle = undefined;
+              timeoutHandle = undefined;
+              Promise.resolve()
+                .then(() => updateSW(true))
+                .then(() => resolve())
+                .catch((err) => reject(err));
+            };
+            if ("requestIdleCallback" in window) {
+              idleHandle = window.requestIdleCallback(activate, { timeout: 30_000 });
+            } else {
+              timeoutHandle = globalThis.setTimeout(activate, 1_000);
+            }
+          }),
+      );
+    },
+  });
+  // vite-plugin-pwa does not expose an unregister operation from registerSW;
+  // the worker lifecycle is managed by the browser after registration.  The
+  // cleanup below cancels any scheduled activation that the user accepted but
+  // that has not yet fired, so an unmounted component does not trigger an
+  // update.
+  return cancelScheduledActivation;
 }

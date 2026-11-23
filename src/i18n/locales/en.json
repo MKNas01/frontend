@@ -410,6 +410,14 @@
     "working": "Working…",
     "back": "Back"
   },
+  "pwa": {
+    "ready": "A new version is ready.",
+    "applying": "Applying update when the app is idle…",
+    "update_failed": "Update failed. Please try again.",
+    "update": "Update",
+    "updating": "Updating…",
+    "retry": "Retry"
+  },
   "editPrice": {
     "title": "Edit Price",
     "newPriceLabel": "New Price (USDC)",

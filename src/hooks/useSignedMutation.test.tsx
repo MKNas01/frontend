@@ -72,6 +72,114 @@ describe("useSignedMutation", () => {
     expect(submitArgs[2]).toBe(prepareKey);
   });
 
+  it("ignores concurrent execute calls while an operation is in flight and allows a subsequent execution after completion", async () => {
+    let resolvePrepare!: (value: typeof PREPARED) => void;
+    const prepare = vi.fn().mockImplementation(
+      () =>
+        new Promise<typeof PREPARED>((resolve) => {
+          resolvePrepare = resolve;
+        }),
+    );
+    const submit = vi.fn().mockResolvedValue({ hash: "tx-hash-1" });
+    mockedSignWithFreighter.mockResolvedValue(SIGNED_XDR);
+
+    const { result } = renderHook(() =>
+      useSignedMutation<string, { hash: string }>({ prepare, submit }),
+    );
+
+    let firstPromise!: Promise<void>;
+    let duplicatePromise!: Promise<void>;
+    act(() => {
+      firstPromise = result.current.execute("first-param");
+      duplicatePromise = result.current.execute("duplicate-param");
+    });
+
+    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(prepare).toHaveBeenCalledWith("first-param", expect.any(String));
+
+    await act(async () => {
+      resolvePrepare(PREPARED);
+      await Promise.all([firstPromise, duplicatePromise]);
+    });
+
+    expect(result.current.status).toBe("confirmed");
+    expect(result.current.result).toEqual({ hash: "tx-hash-1" });
+    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(mockedSignWithFreighter).toHaveBeenCalledTimes(1);
+    expect(submit).toHaveBeenCalledTimes(1);
+
+    // Subsequent execution after completion succeeds normally
+    prepare.mockResolvedValueOnce(PREPARED);
+    submit.mockResolvedValueOnce({ hash: "tx-hash-2" });
+
+    await act(async () => {
+      await result.current.execute("second-param");
+    });
+
+    expect(result.current.status).toBe("confirmed");
+    expect(result.current.result).toEqual({ hash: "tx-hash-2" });
+    expect(prepare).toHaveBeenCalledTimes(2);
+    expect(prepare).toHaveBeenLastCalledWith("second-param", expect.any(String));
+    expect(submit).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses fallback idempotency key when crypto.randomUUID is unavailable", async () => {
+    const originalCrypto = globalThis.crypto;
+    vi.stubGlobal("crypto", {});
+
+    try {
+      const prepare = vi.fn().mockResolvedValue(PREPARED);
+      const submit = vi.fn().mockResolvedValue({ hash: "tx-hash" });
+      mockedSignWithFreighter.mockResolvedValue(SIGNED_XDR);
+
+      const { result } = renderHook(() =>
+        useSignedMutation<string, { hash: string }>({ prepare, submit }),
+      );
+
+      await act(async () => {
+        await result.current.execute(PARAMS);
+      });
+
+      await waitFor(() => {
+        expect(result.current.status).toBe("confirmed");
+      });
+
+      const key = prepare.mock.calls[0][1];
+      expect(typeof key).toBe("string");
+      expect(key.length).toBeGreaterThan(0);
+      expect(submit.mock.calls[0][2]).toBe(key);
+    } finally {
+      vi.stubGlobal("crypto", originalCrypto);
+    }
+  });
+
+  it("sets error state without calling prepare when idempotency key generation throws", async () => {
+    vi.spyOn(globalThis.crypto, "randomUUID").mockImplementation(() => {
+      throw new Error("entropy source unavailable");
+    });
+
+    const prepare = vi.fn().mockResolvedValue(PREPARED);
+    const submit = vi.fn().mockResolvedValue({ hash: "tx-hash" });
+
+    const { result } = renderHook(() =>
+      useSignedMutation<string, { hash: string }>({ prepare, submit }),
+    );
+
+    await act(async () => {
+      await result.current.execute(PARAMS);
+    });
+
+    await waitFor(() => {
+      expect(result.current.status).toBe("error");
+    });
+
+    expect(result.current.error).toBe("entropy source unavailable");
+    expect(result.current.result).toBeNull();
+    expect(prepare).not.toHaveBeenCalled();
+    expect(mockedSignWithFreighter).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+  });
+
   it("warns and skips signing on network mismatch, then completes on a corrected retry", async () => {
     const warning =
       "Network mismatch: your wallet is on a different network. Switch Freighter to Stellar Testnet before signing.";
@@ -243,4 +351,5 @@ describe("useSignedMutation", () => {
     expect(mockedSignWithFreighter).not.toHaveBeenCalled();
     expect(submit).not.toHaveBeenCalled();
   });
+});
 });

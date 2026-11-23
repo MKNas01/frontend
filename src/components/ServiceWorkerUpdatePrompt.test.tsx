@@ -19,7 +19,13 @@ describe("ServiceWorkerUpdatePrompt", () => {
 
   it("waits for consent before activating an update and prevents duplicate clicks", async () => {
     const user = userEvent.setup();
-    const activate = vi.fn();
+    let resolveActivate!: () => void;
+    const activate = vi.fn().mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveActivate = resolve;
+        }),
+    );
 
     render(
       <StrictMode>
@@ -43,5 +49,37 @@ describe("ServiceWorkerUpdatePrompt", () => {
 
     await user.click(screen.getByRole("button", { name: "Updating…" }));
     expect(activate).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveActivate();
+    });
+  });
+
+  it("recovers with a retryable error when worker activation fails", async () => {
+    const user = userEvent.setup();
+    const activate = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Service worker activation failed"))
+      .mockResolvedValueOnce(undefined);
+
+    render(<ServiceWorkerUpdatePrompt />);
+
+    const onUpdateAvailable = registerMock.mock.calls[0][0];
+    act(() => onUpdateAvailable(activate));
+
+    await user.click(screen.getByRole("button", { name: "Update" }));
+
+    expect(activate).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Update failed. Please try again.",
+    );
+
+    const retryButton = screen.getByRole("button", { name: "Retry" });
+    expect(retryButton).toBeEnabled();
+
+    await user.click(retryButton);
+
+    expect(activate).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

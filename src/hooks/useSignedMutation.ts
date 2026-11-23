@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { checkNetwork } from "./useNetworkCheck.js";
 import { signWithFreighter } from "../lib/freighter.js";
 import { newIdempotencyKey } from "../lib/idempotency.js";
@@ -35,8 +35,14 @@ export function useSignedMutation<TParams, TResult>(
   const [result, setResult] = useState<TResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [networkWarning, setNetworkWarning] = useState<string | null>(null);
+  const inFlightRef = useRef(false);
 
   async function execute(params: TParams) {
+    if (inFlightRef.current) {
+      return;
+    }
+    inFlightRef.current = true;
+
     setError(null);
     setNetworkWarning(null);
     setResult(null);
@@ -73,6 +79,8 @@ export function useSignedMutation<TParams, TResult>(
           : "Could not complete the operation. Check your wallet connection and try again.",
       );
       setStatus("error");
+    } finally {
+      inFlightRef.current = false;
     }
   }
 
